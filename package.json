@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@tensorflow/tfjs-converter": "^3.16.0",
+    "@tensorflow/tfjs-node": "^3.16.0",
+    "dotenv": "^16.0.0"
+  }
+}
