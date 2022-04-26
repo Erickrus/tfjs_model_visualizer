@@ -7,18 +7,18 @@
 require('@tensorflow/tfjs-node');
 require('dotenv').config();
 
-// parse parameter
+// parse command line parameter
+// only accept relative filename, e.g. model.json or facemesh/model.json
 function getParameter() {
    if (process.argv.length>2) {
       const relativePath = process.cwd();
       const inputFilename = ["file:/", relativePath, process.argv[2]].join("/");
-      //console.log(inputFilename);
       return inputFilename;
    }
    return "";
 }
 
-// generate graph
+// generate graphviz
 async function main(argv) {
    const debugTf = require('debug')('tf');
    const debugTfVerbose = require('debug')('tf:verbose');
@@ -37,6 +37,7 @@ async function main(argv) {
          "children": []
       }
 
+      // this is where the data comes from
       var node = model.executor.graph.nodes[nodeName];
       nodeObj["name"] = nodeName;
       nodeObj["op"] = node.op;
@@ -46,11 +47,13 @@ async function main(argv) {
 	    nodeObj.inputs.push(nodeItem["name"]);
          }
       }
+      // currently not used
       if (node.children!= null) {
          for (nodeItem of node.children) {
             nodeObj.children.push(nodeItem["name"]);
          }
       }
+      // currently not used
       if (node.outputs != null) {
          for (nodeItem of node.outputs) {
             nodeObj.outputs.push(nodeItem["name"]);
@@ -58,7 +61,8 @@ async function main(argv) {
       }
       nodeDeps.push(nodeObj);
    }
-
+	
+   // colors are based on category field in the json, some categories are to be added
    var colorMappings = {
       "graph": " style=filled color=\"lightskyblue2\"",
       "transformation" : " style=filled color=\"lightcyan2\"",
@@ -69,12 +73,15 @@ async function main(argv) {
       "slice_join": " style=filled color=\"lightskyblue1\""
    };
 
+   // initialize the digraph
    lines = "digraph G{\n";
 
    for (var i=0;i<nodeDeps.length;i++){
       var nodeName = nodeDeps[i]["name"];
       var nodeOp = nodeDeps[i]["op"];
       var nodeCategory = nodeDeps[i]["category"];
+	   
+      // parsing input/placeholder
       if (nodeOp == "Placeholder") {
          for (inputNodeName of Object.keys(model.executor.graph.signature.inputs)) {
             if (model.executor.graph.signature.inputs[inputNodeName].name.replaceAll(":0","") == nodeName) {
@@ -90,7 +97,8 @@ async function main(argv) {
             }
          }
       }
-
+	   
+      // parsing output/identity, which is almost the same as input/placeholder
       if (nodeOp == "Identity") {
 	 for (outputNodeName of Object.keys(model.executor.graph.signature.outputs)) {
 	    if (model.executor.graph.signature.outputs[outputNodeName].name.replaceAll(":0","") == nodeName) {
@@ -100,13 +108,19 @@ async function main(argv) {
 		  dim.push(model.executor.graph.signature.outputs[outputNodeName].tensorShape.dim[j].size)
 	       }
 	       nodeName += " ["+dim.join(",")+"]";
+	       nodeName = nodeName.replaceAll(":0","");
+	       nodeName = nodeName.replaceAll(":1","");
 	       break;
 	    }
 	 }
       }
+
+      // skip Const and NoOp, here, NoOp is kind of control node
       if (nodeOp == "Const" || nodeOp == "NoOp"){
 	 continue;
       }
+
+      // mapping the colors
       var color ="";
       for (colorKey of Object.keys(colorMappings)) {
 	 if (nodeCategory.toLowerCase().indexOf(colorKey)>=0) {
@@ -115,30 +129,25 @@ async function main(argv) {
 	 }
       }
       
+      // generate operation
       var nodeId = i;
       lines += i+" [ shape=\"box\" label=\""+nodeName+" ("+nodeOp+")"+"\""+color+"]\n";
 
+      // generate connection, mainly from inputs
       for (var j=0;j<nodeDeps[i]["inputs"].length;j++) {
 	  for (var k=0;k<nodeDeps.length;k++) {
 	     if (nodeDeps[k]["op"] == "Const" || nodeDeps[k]["op"] =="NoOp") continue;
 	     if (nodeDeps[i]["inputs"][j] == nodeDeps[k]["name"]) {
-		//lines += i+" -> "+k+"\n";
 		lines += k+" -> "+i+"\n";
 	     }
 	  }
       }
-      /*
-      // no need for the children, it is completely duplicated
-      for (var j=0;j<nodeDeps[i]["children"].length;j++) {
-	  for (var k=0;k<nodeDeps.length;k++) {
-	     if (nodeDeps[k]["op"] == "Const" || nodeDeps[k]["op"] =="NoOp") continue;
-	     if (nodeDeps[i]["children"][j] == nodeDeps[k]["name"]) {
-		lines += i+" -> "+k+" [color=\"red\"]\n";
-	     }
-	  }
-      }*/
    }
+
+   // It seems this is not needed here
    lines = lines.replaceAll("StatefulPartitionedCall/","");
+	
+   // finalize the digraph
    lines +="}\n"
    console.log(lines);
 }
